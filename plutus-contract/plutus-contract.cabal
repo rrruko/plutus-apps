@@ -241,10 +241,11 @@ test-suite plutus-contract-test
     Spec.Plutus.Contract.Oracle
     Spec.Plutus.Contract.Wallet
     Spec.Rows
+    Spec.ScriptContext.V1.RequiredSigner
+    Spec.ScriptContext.V1.TimeValidity
     Spec.Secrets
     Spec.State
     Spec.ThreadToken
-    Spec.TimeValidity
 
   --------------------
   -- Local components

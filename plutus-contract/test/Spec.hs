@@ -8,10 +8,11 @@ import Spec.ErrorChecking qualified
 import Spec.Plutus.Contract.Oracle qualified
 import Spec.Plutus.Contract.Wallet qualified
 import Spec.Rows qualified
+import Spec.ScriptContext.V1.RequiredSigner qualified
+import Spec.ScriptContext.V1.TimeValidity qualified
 import Spec.Secrets qualified
 import Spec.State qualified
 import Spec.ThreadToken qualified
-import Spec.TimeValidity qualified
 import Test.Tasty (TestTree, defaultMain, testGroup)
 
 main :: IO ()
@@ -24,7 +25,8 @@ tests = testGroup "plutus-contract" [
     Spec.State.tests,
     Spec.Rows.tests,
     Spec.ThreadToken.tests,
-    Spec.TimeValidity.tests,
+    Spec.ScriptContext.V1.TimeValidity.tests,
+    Spec.ScriptContext.V1.RequiredSigner.tests,
     Spec.Secrets.tests,
     Spec.ErrorChecking.tests,
     Spec.Plutus.Contract.Wallet.tests,
