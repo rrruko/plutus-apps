@@ -1,5 +1,5 @@
-ADR 4: PAB and indexing solution integration
-============================================
+ADR 4: PAB and indexing component integration
+=============================================
 
 Date: 2022-06-28
 
@@ -11,7 +11,7 @@ koslambrou <konstantinos.lambrou@iohk.io>
 Status
 ------
 
-Draft
+Draft (this ADR will change status once we arrive at a point were we can start the implementation)
 
 Context
 -------
@@ -67,7 +67,7 @@ Why? Here’s some context.
 The PAB listens to the local node and stores blockchain information in memory such as the status of transactions, the status of transaction outputs, the last synced slot, the current slot, etc., in a variable of type `BlockchainEnv`.
 The `awaitTxConfirmed` is actually querying the state of `BlockchainEnv` and waits until the status of the transaction transitions to `Confirmed`.
 
-Meanwhile, plutus-chain-index (our main indexing solution at the time of this writing) is also listening to incoming blocks from the local node and indexes them into a database.
+Meanwhile, plutus-chain-index (our main indexing component at the time of this writing) is also listening to incoming blocks from the local node and indexes them into a database.
 The indexed data can be queried using the REST API interface.
 
 This brings up the main issue: the PAB and plutus-chain-index each listen to the same source of information (a local Cardano node), but each index the information at different speeds.
@@ -76,13 +76,24 @@ For a dApp developer writing off-chain code using the Contract API, there is no 
 Currently, in the best case scenario (fully synced PAB and plutus-chain-index), plutus-chain-index will always trail behind the in-memory storage of the PAB by a few seconds.
 Therefore, even in this scenario, querying the plutus-chain-index with `unspentTxOutFromRef` in the above contract has a high probability of returning `Nothing`.
 
-Decision
---------
+Decisions
+---------
 
-TBD
+The best solution is probably a combination of the `Alternative solutions`_ described below.
+However, we will mainly choose the `Query functions should interact with a single source of truth`_ solution.
 
-Alternatives
-------------
+* We will replace `plutus-chain-index` with `Marconi` as PAB's indexing component
+
+* We will move out the Blockchain information indexed by PAB in Marconi
+
+* We will add new indexers in Marconi in order to replicate the information indexed by `plutus-chain-index`
+
+* We will adapt the architecture of Marconi (which will become our new indexing component) to support waiting queries
+
+* Since HTTP APIs are not well suited to waiting queries, we will use RPC via UNIX Socket to communicate information between PAB and Marconi
+
+Alternative solutions
+---------------------
 
 In this section, we describe all the ways to deal with the problem.
 Note that final decision might include one or more of these alternate solutions.
@@ -90,7 +101,7 @@ Note that final decision might include one or more of these alternate solutions.
 Make sure all components are in sync
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-We can make sure that all indexing solutions are syncing at the same speed.
+We can make sure that all indexing components are syncing at the same speed.
 For example, if PAB syncs from the local node and arrives at slot 100, then it needs to wait for the chain-index to also arrive at slot 100.
 Only then can it respond to a Contract request.
 
@@ -104,15 +115,15 @@ Pros:
 
 Cons:
 
-- As fast as the slowest indexing solution
+- As fast as the slowest indexing component
 - Tight coupling between the indexing components meaning that if the Contract only uses chain-index requests without using requests from other indexing components, the chain-index will still have to wait for all other components to be in sync with each other
 
 Add indexing specific functions in the Contract API
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In this scenario, we would need to split Contract API requests which interact with an external indexing solution to the ones that use the PAB.
+In this scenario, we would need to split Contract API requests which interact with an external indexing component to the ones that use the PAB.
 Currently, we have `awaitTxConfirmed` which uses the indexed information in the PAB to wait for a transaction status to change to `Confirmed`.
-On top of that, we can have `awaitTxIndexed` or `awaitTxOutIndexed` which will wait for the information to be indexed in the external indexing solution.
+On top of that, we can have `awaitTxIndexed` or `awaitTxOutIndexed` which will wait for the information to be indexed in the external indexing component.
 
 Pros:
 
@@ -122,14 +133,14 @@ Pros:
 Cons:
 
 - Adds an undesired complexity to the Contract API
-- We'll need to add a bunch of functions (e.g., `currentNodeSlot`, `currentMarconiSlot`, `awaitMarconiTxConfirmed, `awaitScrollsTxConfirmed`, etc.) for each new indexing solution we want to support
+- We'll need to add a bunch of functions (e.g., `currentNodeSlot`, `currentMarconiSlot`, `awaitMarconiTxConfirmed, `awaitScrollsTxConfirmed`, etc.) for each new indexing component we want to support
 
 Query functions should interact with a single source of truth
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In this scenario, we make the design decision that the Contract API should only interact with a single indexing solution.
-Thus, any blockchain information currently stored in the PAB should be moved to the indexing solution.
-Also, combining indexing solutions would need to be integrated in the single indexing solution that’s connected to the PAB.
+In this scenario, we make the design decision that the Contract API should only interact with a single indexing component.
+Thus, any blockchain information currently stored in the PAB should be moved to the indexing component.
+Also, combining indexing components would need to be integrated in the single indexing solution that’s connected to the PAB.
 
 Pros:
 
@@ -139,16 +150,16 @@ Pros:
 
 Cons:
 
-- PAB won't be able to integrate with external indexing solutions (e.g. Blockfrost_ or Scrolls_), but these external solutions would need to be integrated into the single source of truth indexing solution. Therefore, this solution reduces the PAB's flexibility.
-- The design of the indexing solution will need to be changed to support waiting queries (like the `awaitTxConfirmed` from PAB)
+- PAB won't be able to integrate with external indexing components (e.g. Blockfrost_ or Scrolls_), but these external solutions would need to be integrated into the single source of truth indexing solution. Therefore, this solution reduces the PAB's flexibility.
+- The design of the indexing component will need to be changed to support waiting queries (like the `awaitTxConfirmed` from PAB)
 
 Alter indexing query APIs to include valid slots information
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In this scenario, we can instead embrace the fact that the indexing solution is not always in sync with the PAB.
-We can alter the indexing solution query APIs (like `utxosAt` or `txOutFromRef`) to include some sort of `ValidSlotRange` information.
-Therefore, the user would need to specify the `SlotRange` from which he expects the indexing solution to be synced.
-If the currently indexed slot of the PAB and indexing solution is not up to what we need, we can either wait for it or throw an error.
+In this scenario, we can instead embrace the fact that the indexing component is not always in sync with the PAB.
+We can alter the indexing component query APIs (like `utxosAt` or `txOutFromRef`) to include some sort of `ValidSlotRange` information.
+Therefore, the user would need to specify the `SlotRange` from which he expects the indexing component to be synced.
+If the currently indexed slot of the PAB and indexing component is not up to what we need, we can either wait for it or throw an error.
 
 Pros:
 
@@ -158,12 +169,7 @@ Pros:
 Cons:
 
 - Makes the query APIs more complicated, which ultimately result in a more complex contract
-- Makes the contract slower if it has to wait for the indexing solution to be synced to the desired `SlotRange`
-
-Implications
-------------
-
-TBD
+- Makes the contract slower if it has to wait for the indexing component to be synced to the desired `SlotRange`
 
 Notes
 -----
@@ -173,3 +179,5 @@ However, the proper solution to the issue would be the implementation of this AD
 
 .. _Blockfrost: https://blockfrost.io
 .. _Scrolls: https://github.com/txpipe/scrolls
+
+This ADR has been discussed here: `#550 <https://github.com/input-output-hk/plutus-apps/pull/550>`_.
