@@ -1,53 +1,47 @@
 {-# LANGUAGE DataKinds         #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeApplications  #-}
 {-# LANGUAGE TypeFamilies      #-}
 
 module PlutusExample.CustomDatumRedeemerGuess
-  ( MyCustomDatum(..)
-  , MyCustomRedeemer(..)
-  , customGuessScript
-  , customDatumRedeemerGuessScriptAsShortBs
-  ) where
+  where
 
-import Prelude hiding (($), (&&), (==))
+import PlutusTx.Prelude
+import qualified PlutusTx
+import Ledger
+import qualified Ledger.Typed.Scripts as Scripts
 
-import Cardano.Api.Shelley (PlutusScript (..), PlutusScriptV1)
+data PoolDatum
+  = PoolDatum { ident :: !Ident }
 
-import Codec.Serialise
-import Data.ByteString.Lazy qualified as LBS
-import Data.ByteString.Short qualified as SBS
+-- `Ident`, named for its most frequent use as an identifier, is basically an
+-- `Integer` encoded as a `ByteString`, because Plutus offers no way to do this
+-- in its standard library.
+newtype Ident = Ident BuiltinByteString
+  deriving newtype (PlutusTx.ToData, PlutusTx.FromData, PlutusTx.UnsafeFromData)
 
-import Plutus.Script.Utils.V1.Typed.Scripts qualified as Scripts
-import Plutus.V1.Ledger.Contexts (ScriptContext)
-import Plutus.V1.Ledger.Scripts qualified as Plutus
-import PlutusTx qualified
-import PlutusTx.Prelude hiding (Semigroup ((<>)), unless, (.))
+instance Eq Ident where
+  {-# inlinable (==) #-}
+  Ident b == Ident b' = b == b'
 
-newtype MyCustomDatum = MyCustomDatum Integer
-newtype MyCustomRedeemer = MyCustomRedeemer Integer
+newtype PoolRedeemer = PoolRedeemer Integer
 
-PlutusTx.unstableMakeIsData ''MyCustomDatum
-PlutusTx.unstableMakeIsData ''MyCustomRedeemer
+PlutusTx.makeIsDataIndexed ''PoolDatum [('PoolDatum, 0)]
+PlutusTx.makeIsDataIndexed ''PoolRedeemer [('PoolRedeemer, 0)]
 
-{-# INLINABLE mkValidator #-}
-mkValidator :: MyCustomDatum -> MyCustomRedeemer -> ScriptContext -> Bool
-mkValidator (MyCustomDatum d) (MyCustomRedeemer r) _ =
-  d == 42 && r == 42
+{-# inlinable poolContract #-}
+poolContract
+  :: PoolDatum
+  -> PoolRedeemer
+  -> ScriptContext
+  -> Bool
+poolContract (PoolDatum _) (PoolRedeemer _) _ctx = True
 
-validator :: Plutus.Validator
-validator = Plutus.mkValidatorScript
-    $$(PlutusTx.compile [|| wrap ||])
- where
-     wrap = Scripts.mkUntypedValidator mkValidator
-
-script :: Plutus.Script
-script = Plutus.unValidatorScript validator
-
-customDatumRedeemerGuessScriptAsShortBs :: SBS.ShortByteString
-customDatumRedeemerGuessScriptAsShortBs = SBS.toShort . LBS.toStrict $ serialise script
-
-customGuessScript :: PlutusScript PlutusScriptV1
-customGuessScript = PlutusScriptSerialised customDatumRedeemerGuessScriptAsShortBs
-
+poolScript :: Validator
+poolScript =
+  mkValidatorScript
+    ($$(PlutusTx.compile [|| wrap ||]))
+  where wrap = Scripts.mkUntypedValidator poolContract
